@@ -8,14 +8,9 @@ import yt_dlp
 
 app = Flask(__name__)
 
-# Use /tmp on Vercel (read-only filesystem), fallback to local dir elsewhere
-IS_VERCEL = os.environ.get("VERCEL") == "1"
-TEMP_FOLDER = "/tmp/ytmp3_downloads" if IS_VERCEL else os.path.join(os.getcwd(), "temp_downloads")
+# Persistent volume or container working directory
+TEMP_FOLDER = os.path.join(os.getcwd(), "temp_downloads")
 os.makedirs(TEMP_FOLDER, exist_ok=True)
-
-# Audio formats yt-dlp can download natively WITHOUT FFmpeg.
-# Preference order: m4a (AAC) > webm (Opus) > best available.
-AUDIO_EXTENSIONS = ('.m4a', '.webm', '.opus', '.ogg', '.mp3', '.aac', '.flac', '.wav')
 
 def cleanup_old_files():
     """Periodically clean up the temp folder."""
@@ -31,9 +26,8 @@ def cleanup_old_files():
             print(f"Cleanup error: {e}")
         time.sleep(1800)  # Run every 30 minutes
 
-# Only run cleanup thread outside of serverless environments
-if not IS_VERCEL:
-    threading.Thread(target=cleanup_old_files, daemon=True).start()
+# Start cleanup thread (safe on persistent platforms like Render/Railway/Docker)
+threading.Thread(target=cleanup_old_files, daemon=True).start()
 
 @app.route("/")
 def index():
@@ -50,9 +44,12 @@ def convert():
     os.makedirs(session_folder, exist_ok=True)
 
     ydl_opts = {
-        # Prefer m4a (no FFmpeg needed), fall back to webm/opus, then anything
-        'format': 'bestaudio[ext=m4a]/bestaudio[ext=webm]/bestaudio/best',
-        # No postprocessors — avoids any FFmpeg dependency entirely
+        'format': 'bestaudio/best',
+        'postprocessors': [{
+            'key': 'FFmpegExtractAudio',
+            'preferredcodec': 'mp3',
+            'preferredquality': '192',
+        }],
         'outtmpl': os.path.join(session_folder, '%(title)s.%(ext)s'),
         'quiet': True,
         'no_warnings': True,
@@ -60,7 +57,6 @@ def convert():
         'user_agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
         'extractor_args': {
             'youtube': {
-                # Rely on API-based non-web clients to bypass the "Sign in to confirm you're not a bot" block
                 'player_client': ['android', 'ios', 'tv']
             }
         },
@@ -70,22 +66,21 @@ def convert():
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             info = ydl.extract_info(url, download=True)
 
-            # Find the downloaded audio file
-            audio_file = None
+            mp3_file = None
             for f in os.listdir(session_folder):
-                if f.lower().endswith(AUDIO_EXTENSIONS):
-                    audio_file = os.path.join(session_folder, f)
+                if f.endswith('.mp3'):
+                    mp3_file = os.path.join(session_folder, f)
                     break
 
-            if not audio_file or not os.path.exists(audio_file):
-                return jsonify({"error": "Download failed — no audio file was produced."}), 500
+            if not mp3_file or not os.path.exists(mp3_file):
+                return jsonify({"error": "Conversion failed. FFmpeg might be missing."}), 500
 
-            filename = os.path.basename(audio_file)
+            filename = os.path.basename(mp3_file)
             return jsonify({
                 "success": True,
                 "download_url": f"/download/{session_id}/{filename}",
                 "title": info.get('title', 'Unknown Title'),
-                "format": os.path.splitext(filename)[1].lstrip('.')
+                "format": "mp3"
             })
 
     except Exception as e:
@@ -101,4 +96,4 @@ def download(session_id, filename):
     return send_file(file_path, as_attachment=True)
 
 if __name__ == "__main__":
-    app.run(host="127.0.0.1", port=5000, debug=True)
+    app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 5000)), debug=False)

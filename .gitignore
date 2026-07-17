@@ -27,3 +27,5 @@ temp_downloads/
 # IDEs
 .vscode/
 .idea/
+.vercel
+.env*
