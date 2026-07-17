@@ -9,7 +9,7 @@ import yt_dlp
 # Add bundled FFmpeg binaries to PATH (for Vercel and environments without system FFmpeg)
 try:
     import static_ffmpeg
-    static_ffmpeg.add_paths()
+    static_ffmpeg.add_paths(download_dir="/tmp")
 except ImportError:
     pass  # Fall back to system FFmpeg if static_ffmpeg not installed
 
