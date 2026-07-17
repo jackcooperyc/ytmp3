@@ -6,19 +6,16 @@ import time
 from flask import Flask, render_template, request, send_file, jsonify
 import yt_dlp
 
-# Add bundled FFmpeg binaries to PATH (for Vercel and environments without system FFmpeg)
-try:
-    import static_ffmpeg
-    static_ffmpeg.add_paths(download_dir="/tmp")
-except ImportError:
-    pass  # Fall back to system FFmpeg if static_ffmpeg not installed
-
 app = Flask(__name__)
 
 # Use /tmp on Vercel (read-only filesystem), fallback to local dir elsewhere
 IS_VERCEL = os.environ.get("VERCEL") == "1"
 TEMP_FOLDER = "/tmp/ytmp3_downloads" if IS_VERCEL else os.path.join(os.getcwd(), "temp_downloads")
 os.makedirs(TEMP_FOLDER, exist_ok=True)
+
+# Audio formats yt-dlp can download natively WITHOUT FFmpeg.
+# Preference order: m4a (AAC) > webm (Opus) > best available.
+AUDIO_EXTENSIONS = ('.m4a', '.webm', '.opus', '.ogg', '.mp3', '.aac', '.flac', '.wav')
 
 def cleanup_old_files():
     """Periodically clean up the temp folder."""
@@ -28,15 +25,13 @@ def cleanup_old_files():
             for session_id in os.listdir(TEMP_FOLDER):
                 session_path = os.path.join(TEMP_FOLDER, session_id)
                 if os.path.isdir(session_path):
-                    # Remove folders older than 1 hour
                     if os.path.getmtime(session_path) < now - 3600:
                         shutil.rmtree(session_path, ignore_errors=True)
         except Exception as e:
             print(f"Cleanup error: {e}")
         time.sleep(1800)  # Run every 30 minutes
 
-# Only run the cleanup thread outside of serverless environments
-# (Vercel functions are stateless — threads don't persist between invocations)
+# Only run cleanup thread outside of serverless environments
 if not IS_VERCEL:
     threading.Thread(target=cleanup_old_files, daemon=True).start()
 
@@ -55,44 +50,41 @@ def convert():
     os.makedirs(session_folder, exist_ok=True)
 
     ydl_opts = {
-        'format': 'bestaudio/best',
-        'postprocessors': [{
-            'key': 'FFmpegExtractAudio',
-            'preferredcodec': 'mp3',
-            'preferredquality': '192',
-        }],
+        # Prefer m4a (no FFmpeg needed), fall back to webm/opus, then anything
+        'format': 'bestaudio[ext=m4a]/bestaudio[ext=webm]/bestaudio/best',
+        # No postprocessors — avoids any FFmpeg dependency entirely
         'outtmpl': os.path.join(session_folder, '%(title)s.%(ext)s'),
         'quiet': True,
         'no_warnings': True,
         'nocheckcertificate': True,
-        'referer': 'https://www.google.com/',
         'user_agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
         'extractor_args': {
             'youtube': {
                 'player_client': ['web', 'mweb', 'android']
             }
         },
-        # cookiesfrombrowser omitted — no browser available in serverless environments
     }
 
     try:
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             info = ydl.extract_info(url, download=True)
-            # Find the generated mp3 file
-            mp3_file = None
-            for f in os.listdir(session_folder):
-                if f.endswith('.mp3'):
-                    mp3_file = os.path.join(session_folder, f)
-                    break
-            
-            if not mp3_file or not os.path.exists(mp3_file):
-                return jsonify({"error": "Conversion failed. FFmpeg might be missing."}), 500
 
-            filename = os.path.basename(mp3_file)
+            # Find the downloaded audio file
+            audio_file = None
+            for f in os.listdir(session_folder):
+                if f.lower().endswith(AUDIO_EXTENSIONS):
+                    audio_file = os.path.join(session_folder, f)
+                    break
+
+            if not audio_file or not os.path.exists(audio_file):
+                return jsonify({"error": "Download failed — no audio file was produced."}), 500
+
+            filename = os.path.basename(audio_file)
             return jsonify({
                 "success": True,
                 "download_url": f"/download/{session_id}/{filename}",
-                "title": info.get('title', 'Unknown Title')
+                "title": info.get('title', 'Unknown Title'),
+                "format": os.path.splitext(filename)[1].lstrip('.')
             })
 
     except Exception as e:
@@ -101,7 +93,7 @@ def convert():
 @app.route("/download/<session_id>/<filename>")
 def download(session_id, filename):
     file_path = os.path.join(TEMP_FOLDER, session_id, filename)
-    
+
     if not os.path.exists(file_path):
         return "File not found", 404
 

@@ -17,7 +17,7 @@
             </div>
             <button type="submit" id="submitBtn">
                 <span class="loader"></span>
-                <span>Convert to MP3</span>
+                <span>Download Audio</span>
             </button>
         </form>
 
@@ -55,9 +55,9 @@
                 if (data.success) {
                     resultArea.innerHTML = `
                         <div class="success-card">
-                            <p style="color: #22c55e; font-weight: 600;">✅ Conversion Successful!</p>
+                            <p style="color: #22c55e; font-weight: 600;">✅ Download Ready!</p>
                             <p style="margin: 0.5rem 0; font-size: 0.9rem; opacity: 0.8;">${data.title}</p>
-                            <a href="${data.download_url}" class="download-btn">Download MP3</a>
+                            <a href="${data.download_url}" class="download-btn">Download Audio (.${data.format || 'm4a'})</a>
                         </div>
                     `;
                     resultArea.classList.add('active', 'success-card');
