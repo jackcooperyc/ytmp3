@@ -60,7 +60,8 @@ def convert():
         'user_agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
         'extractor_args': {
             'youtube': {
-                'player_client': ['web', 'mweb', 'android']
+                # Rely on API-based non-web clients to bypass the "Sign in to confirm you're not a bot" block
+                'player_client': ['android', 'ios', 'tv']
             }
         },
     }
