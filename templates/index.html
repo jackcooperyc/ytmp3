@@ -1,0 +1,85 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Video URL to MP3 Converter</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+</head>
+<body>
+    <div class="container">
+        <h1>URL to MP3</h1>
+        <p class="subtitle">Convert any video URL to high-quality audio instantly.</p>
+        
+        <form id="convertForm">
+            <div class="input-group">
+                <input type="text" id="urlInput" name="url" placeholder="Paste video URL here (YouTube, Vimeo, etc.)" required>
+            </div>
+            <button type="submit" id="submitBtn">
+                <span class="loader"></span>
+                <span>Convert to MP3</span>
+            </button>
+        </form>
+
+        <div id="resultArea" class="result-area">
+            <!-- Results will be injected here -->
+        </div>
+    </div>
+
+    <script>
+        const form = document.getElementById('convertForm');
+        const submitBtn = document.getElementById('submitBtn');
+        const resultArea = document.getElementById('resultArea');
+        const urlInput = document.getElementById('urlInput');
+
+        form.onsubmit = async (e) => {
+            e.preventDefault();
+            
+            // UI States
+            submitBtn.classList.add('loading');
+            submitBtn.disabled = true;
+            resultArea.style.display = 'none';
+            resultArea.className = 'result-area';
+
+            const formData = new FormData();
+            formData.append('url', urlInput.value);
+
+            try {
+                const response = await fetch('/convert', {
+                    method: 'POST',
+                    body: formData
+                });
+                
+                const data = await response.json();
+
+                if (data.success) {
+                    resultArea.innerHTML = `
+                        <div class="success-card">
+                            <p style="color: #22c55e; font-weight: 600;">✅ Conversion Successful!</p>
+                            <p style="margin: 0.5rem 0; font-size: 0.9rem; opacity: 0.8;">${data.title}</p>
+                            <a href="${data.download_url}" class="download-btn">Download MP3</a>
+                        </div>
+                    `;
+                    resultArea.classList.add('active', 'success-card');
+                } else {
+                    throw new Error(data.error || 'Conversion failed');
+                }
+            } catch (error) {
+                resultArea.innerHTML = `
+                    <div class="error-card">
+                        <p>❌ Error: ${error.message}</p>
+                        <p style="font-size: 0.8rem; margin-top: 0.5rem; opacity: 0.7;">
+                            Make sure FFmpeg is installed and the URL is valid.
+                        </p>
+                    </div>
+                `;
+                resultArea.classList.add('active', 'error-card');
+            } finally {
+                submitBtn.classList.remove('loading');
+                submitBtn.disabled = false;
+                resultArea.style.display = 'block';
+            }
+        };
+    </script>
+</body>
+</html>
