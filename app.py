@@ -3,13 +3,21 @@ import uuid
 import shutil
 import threading
 import time
-from flask import Flask, render_template, request, send_file, jsonify, after_this_request
+from flask import Flask, render_template, request, send_file, jsonify
 import yt_dlp
+
+# Add bundled FFmpeg binaries to PATH (for Vercel and environments without system FFmpeg)
+try:
+    import static_ffmpeg
+    static_ffmpeg.add_paths()
+except ImportError:
+    pass  # Fall back to system FFmpeg if static_ffmpeg not installed
 
 app = Flask(__name__)
 
-# Configuration
-TEMP_FOLDER = os.path.join(os.getcwd(), "temp_downloads")
+# Use /tmp on Vercel (read-only filesystem), fallback to local dir elsewhere
+IS_VERCEL = os.environ.get("VERCEL") == "1"
+TEMP_FOLDER = "/tmp/ytmp3_downloads" if IS_VERCEL else os.path.join(os.getcwd(), "temp_downloads")
 os.makedirs(TEMP_FOLDER, exist_ok=True)
 
 def cleanup_old_files():
@@ -27,8 +35,10 @@ def cleanup_old_files():
             print(f"Cleanup error: {e}")
         time.sleep(1800)  # Run every 30 minutes
 
-# Start cleanup thread
-threading.Thread(target=cleanup_old_files, daemon=True).start()
+# Only run the cleanup thread outside of serverless environments
+# (Vercel functions are stateless — threads don't persist between invocations)
+if not IS_VERCEL:
+    threading.Thread(target=cleanup_old_files, daemon=True).start()
 
 @app.route("/")
 def index():
@@ -62,7 +72,7 @@ def convert():
                 'player_client': ['web', 'mweb', 'android']
             }
         },
-        'cookiesfrombrowser': ('chrome',), # Focus on Chrome for Mac compatibility
+        # cookiesfrombrowser omitted — no browser available in serverless environments
     }
 
     try:
